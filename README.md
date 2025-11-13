@@ -21,10 +21,11 @@ Net load is the hinge connecting physical operations with economic outcomes. Tra
 
 ## Key Findings Summary
 - Net load displays strong intraday and seasonal structure: renewables carve midday troughs yet evening ramps remain the binding stress point, especially in winter and late summer. This informs when peaking assets earn scarcity rents and when storage is most valuable.
-- PJM price is convex in net load. Below roughly 110 GW, prices hover near $25–30/MWh; once net load exceeds 125 GW the marginal $/MWh jump accelerates rapidly, which is where uplift payments, scarcity pricing, and demand-response events concentrate.
-- Renewable share is inversely related to price. Higher renewable penetration directly lowers clearing prices because fewer gas units set the marginal bid. Consumers benefit through cheaper energy while generators pivot toward capacity payments, renewable credits, or hedging strategies to stabilise revenue.
-- The January 2024 Arctic outbreak temporarily broke the historical net-load/price correlation, demonstrating how fuel scarcity and emergency dispatch can override demand fundamentals. EIA recorded a record 141.5 Bcf of U.S. gas demand on 16 January, and PJM experienced the same physical stress through high prices and emergency alerts.
-- Polynomial regression (degree 10) captures the flat-to-steep curvature in the price response while leaving interpretable residuals that flag scarcity events or renewable surpluses. Those residuals highlight when price embeds congestion, fuel risk, or policy intervention beyond what load alone predicts.
+- PJM price is convex in net load. Below roughly 110 GW, prices hover near \$25–30/MWh; once net load exceeds 125 GW the marginal $/MWh jump accelerates rapidly, which is where uplift payments, scarcity pricing, and demand-response events concentrate.
+- Temperature extremes and Henry Hub spikes jointly drive residuals. The temperature/gas scatters show both heating and cooling wings adding $10–$20/MWh above baseline, while gas residual charts quantify a ~$22/MWh lift per $1/MMBtu when fuel is scarce.
+- Polynomial fits explain only ~52 % of price variance; an XGBoost model that ingests load, temperature, gas, and cyclical features raises test R² to ~0.86 with ~$5.9/MWh RMSE, halving the error budget.
+- Extreme-event classifiers trained on the same feature stack identify price spikes with AUC ≈ 0.98 (dips ≈ 0.96), providing an operational warning system alongside the regression.
+- Short-horizon forecasts are feasible: the temperature/gas XGBoost forecasters deliver ~3.8 °F and ~$0.66/MMBtu RMSE, and a 7-day walk-forward backtest of the price model lands near ~$8/MWh RMSE, demonstrating forward accuracy rather than just a static holdout score.
 
 ## Data Sources
 All source files reside under `data/` and are provided externally.
@@ -262,6 +263,24 @@ Visuals reside in `plots/`. Commentary summarises the behaviour shown by each fi
 - Gas price alone explains about one-third of the daily residual variance (R² ≈ 0.32); every $1/MMBtu move shifts the PJM residual by roughly $22/MWh even after net load is stripped out.
 - Negative residuals appear only when gas is exceptionally cheap and renewables are long, reinforcing the dual dependence on fuel and temperature.
 
+### Combined Load + Temperature + Gas Modeling
+![Combined timeseries](plots/combined_timeseries_overview.png)
+![Net load scatter](plots/combined_scatter_netload_price.png)
+![Temperature scatter](plots/combined_scatter_temp_price.png)
+- Aligning all three drivers on the same timeline shows that headline price spikes only occur when weather-driven load and gas tightness overlap. Pure load ramps without fuel stress stay in the $30–$60/MWh band.
+- The net-load scatter coloured by gas price highlights how high-gas hours sit above the historical cost curve, while the temperature scatter (size = gas) shows both heating and cooling extremes pushing PJM into scarcity pricing.
+
+### XGBoost Regression Diagnostics
+![XGB holdout overlay](plots/combined_xgb_holdout_overlay.png)
+![XGB predictions vs actual](plots/combined_xgb_pred.png)
+- The load+temp+gas XGBoost regressor hits ~0.86 test R² with ~$5.9/MWh RMSE, roughly half the error of the best linear model (~$10.6/MWh) and the net-load-only baseline (~$11.8/MWh).
+- The holdout overlay proves the booster tracks actual price almost hour-for-hour on the out-of-sample slice, so the model isn’t merely fitting noise.
+
+### Gas Volatility Residual Impact
+![Gas volatility residual](plots/combined_gas_vol_residual.png)
+- Plotting residuals against 30-day Henry Hub volatility shows little deviation until vol surpasses ~1.5 $/MMBtu, after which residuals climb quickly. While volatility never breached the “mean + 1σ” trigger in this sample, the slope quantifies how fast prices detach from a load-only view when fuel is stressed.
+- This chart is the operational guardrail for when to expect PJM price deviations even if the load outlook appears ordinary.
+
 ### Event Study: January 2024
 ![Gas event](plots/gas_event_jan2024.png)
 - Gas, PJM price, and the residual all spiked in the same 48-hour window during the polar vortex, showing how fuel scarcity layered on top of high net load.
@@ -275,13 +294,13 @@ Visuals reside in `plots/`. Commentary summarises the behaviour shown by each fi
 
 ### Price Projection Using Forecast Inputs
 ![Future price forecast](plots/combined_future_price_forecast.png)
-- Feeding the predicted temperature & gas series plus a simple net-load surrogate into the XGBoost price model produces a 14-day PJM outlook; the regression still posts ~0.86 test R² / ~$5.9-MWh RMSE when validated on historical data.
+- Feeding the predicted temperature & gas series plus the XGBoost net-load surrogate into the price model produces a 14-day PJM outlook. The figure overlays actuals (blue) with both reconstructed history and forward predictions (orange dashed) so you can visually verify fit before trusting the tail.
 - Treat these forecasts as directional guidance (which days look riskier) rather than settlement-ready prices—the upstream temperature and gas errors compound beyond two weeks.
 
 ### Rolling Backtest
 ![Rolling backtest](plots/combined_rolling_backtest.png)
-- A 7-day walk-forward backtest retrains the daily XGBoost model using only historical data and predicts the price one week ahead; over the 2023–2024 window it lands at ~\$8/MWh RMSE with clear tracking of major swings.
-- The overlay shows how the forecast line (orange) follows the actual (blue) even during shoulder-season dips, giving a realistic view of forward accuracy rather than a single holdout snapshot.
+- A 7-day walk-forward backtest retrains the daily XGBoost model using only historical data at each step and predicts the price one week ahead. Over the 2023–2024 window it lands at ~$8/MWh RMSE (MAE ~$6/MWh) while still catching both winter spikes and spring dips.
+- The orange forecast line shadows the blue actual line even around regime shifts, giving a realistic view of forward accuracy instead of a single static holdout score.
 
 ---
 This README doubles as the project report. For deeper detail, review the Markdown commentary embedded throughout `energy.ipynb`, which mirrors and expands upon the observations noted above. Re-running the notebook will regenerate all figures and CSVs to keep this document in sync with the latest data.
