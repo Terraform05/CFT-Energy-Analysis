@@ -34,12 +34,19 @@ All source files reside under `data/` and are provided externally.
 | `historical_power_load.csv` | PJM forecast load by area, timestamped in UTC/EPT | `forecast_area`, `forecast_hour_beginning_ept`, `forecast_load_mw` |
 | `generation_by_source.csv` | Hourly generation by fuel type, with renewable flags | `datetime_beginning_ept`, `fuel_type`, `mw`, `is_renewable` |
 | `day_ahead_energy_price.csv` | Day-ahead PJM prices by pnode | `pnode_name`, `system_energy_price_da`, `datetime_beginning_ept` |
+| `day_ahead_temperature.csv` | PJM day-ahead temperature guidance by zone/daypart | `datetime_beginning_ept`, `zone`, `da_temperature_set` |
+| `daily_henryhub_naturalgasspotprice.csv` | EIA Henry Hub daily spot prices | `Date`, `Henry Hub Natural Gas Spot Price (Dollars per Million Btu)` |
 
 ## Repository Contents
 
 | Path | Description |
 | --- | --- |
 | `energy.ipynb` | Primary notebook covering ingestion, processing, plotting, modelling, and narrative commentary. |
+| `temp_analysis.ipynb` | Companion notebook that analyzes PJM day-ahead temperature guidance and ties it back to the net-load/price findings. |
+| `naturalGas.ipynb` | Henry Hub spot analysis with seasonality, volatility, and PJM linkage diagnostics. |
+| `combined_analysis.ipynb` | Exploratory notebook combining load, temperature, and gas features to model PJM price. |
+| `temp_forecast.ipynb` | XGBoost-based daily PJM temperature forecast feeding the combined model. |
+| `gas_forecast.ipynb` | XGBoost-based Henry Hub forecast plus volatility projections for price inputs. |
 | `data/` | Raw CSV inputs described above (not tracked here). |
 | `plots/` | Auto-generated PNGs for every figure (ignored by git). |
 | `csv_plots/` | CSV snapshots of each plot’s underlying aggregated data (ignored). |
@@ -165,6 +172,116 @@ Visuals reside in `plots/`. Commentary summarises the behaviour shown by each fi
 ![Autocorrelation](plots/autocorr_price_net_load.png)
 - Net load retains daily (about 24 h) and weekly (about 168 h) memory, guiding short-term forecast horizons for system operators and quantitative traders.
 - Price autocorrelation decays faster, reflecting added noise from fuel prices, outages, and market interventions; beyond one day ahead, models must incorporate exogenous drivers rather than load alone.
+
+## Temperature Analysis Addendum
+
+### PJM Temperature Envelope
+![Temperature envelope](plots/temp_daily_trend.png)
+- Daily PJM averages ranged from 32 °F to 95 °F, with the 7-day mean bottoming near 34 °F during the mid-January Arctic blast and peaking near 84 °F in July; those windows mirror the scarcity spikes called out in `energy.ipynb`.
+- The shaded min/max band shows a 20 °F+ spread across constituent zones even outside extremes, illustrating why localized heating and cooling pockets still matter inside a system-level view.
+
+### Hourly Structure by Month
+![Temperature heatmap](plots/temp_hourly_heatmap.png)
+- Winter nights (Dec–Feb) sit below 40 °F for roughly half the day, while summer afternoons stay above 80 °F through the 19:00 EPT ramp—exactly when fast-ramping gas units set PJM price.
+- Shoulder months compress into the 50–70 °F corridor, lining up with the calmer net-load volatility and flatter price residuals previously documented.
+
+### Temperature vs System Price
+![Temperature vs price](plots/temp_vs_price_scatter.png)
+- Mild 55–65 °F hours clear near $24/MWh on average, but both ≤40 °F heating events and ≥80 °F cooling events add roughly $12–$18/MWh, recreating the convex response in the net-load scatter plots.
+- The coldest hours (32 °F) peaked at $287/MWh on 16–17 Jan 2024, while the July heat dome pushed prices to $160–$180/MWh—proof that both heating and cooling stress create scarcity premia.
+
+### Temperature vs Net Load
+![Temperature vs net load](plots/temp_vs_netload_scatter.png)
+- Net load jumps from ~73 GW in mild weather to >95 GW once temperatures exceed ~78 °F, and similar load levels return below 40 °F when electric heating dominates.
+- This symmetry explains why the polynomial fit in `energy.ipynb` steepens on both wings: temperature extremes push load into the non-linear section of the price curve regardless of season.
+
+### Rolling Temperature Correlations
+![Temperature correlations](plots/temp_corr_price_netload.png)
+- Temperature maintains a 0.6–0.75 correlation with RTO net load across most of the year, only dipping during temperate spring weeks when renewables shoulder more of the load.
+- Temperature-price correlation swings between -0.4 (shoulder months) and 0.7 (peak stress), signalling when a temperature-only model is sufficient versus when fuel or renewable residuals must take the lead.
+
+### January 2024 Event Study
+![January event](plots/temp_event_jan2024.png)
+- The mid-January Arctic blast pushed temperature into the low 30 °F range, net load above 120 GW, and price to $287/MWh inside 48 hours—the same outlier cluster flagged in the energy notebook’s scatter plots.
+- Seeing the three series stack on top of each other shows why the polynomial load fit under-predicted price: HDD-driven fuel scarcity layered on top of already elevated load.
+
+### Temperature Bucket Deltas
+![Bucket deltas](plots/temp_bucket_deltas.png)
+- Relative to mild 55–65 °F hours, ≤40 °F conditions add ~$13/MWh and ~15 GW of load, while ≥80 °F adds ~$18/MWh and ~30 GW, quantifying how temperature pushes dispatch into the convex part of the price curve.
+- The hour count per bucket highlights why tail events still drive portfolio risk even though they represent a minority of observations.
+
+### Temperature vs Price Residuals
+![Temperature residuals](plots/temp_vs_price_residual.png)
+- After removing the 10th-degree net-load fit from `energy.ipynb`, hot (>80 °F) and cold (<40 °F) hours still carry positive $/MWh residuals, explaining the upside spikes in the original residual plots.
+- Spring shoulder hours (<70 °F) fall negative, matching the renewable-rich periods where the main notebook showed prices clearing below the load-based expectation.
+
+## Henry Hub Natural Gas Addendum
+
+### Long-Run Price Structure
+![Gas history](plots/gas_price_history.png)
+- Henry Hub averaged $4.42/MMBtu since 1997 but spiked above $12 during the 2005–2008 hurricane years and again during the 2021–2022 global LNG crunch—the same windows when PJM prices decoupled in `energy.ipynb`.
+- The 30-day mean now tracks the 252-day mean near $2.30/MMBtu, helping keep current PJM prices pinned in the $20–$35/MWh band.
+
+### Volatility and Distribution
+![Gas volatility](plots/gas_volatility_distribution.png)
+- 30-day volatility tripled during hurricanes, the financial crisis, and Winter Storm Uri, explaining why PJM residuals ballooned even without huge net-load changes.
+- Daily percent-change distribution is fat-tailed; >5 % moves are common, so hedges discussed in the energy notebook need fuel overlays to cover price tails.
+
+### Seasonality
+![Gas monthly box](plots/gas_monthly_box.png)
+- Winter months show the widest range thanks to heating shocks, aligning with PJM’s peak net-load stress hours.
+- Shoulder seasons cluster in the $2–$4/MMBtu band, mirroring the cheaper PJM outcomes when renewable share is high.
+
+### Year/Month Heatmap
+![Gas heatmap](plots/gas_year_month_heatmap.png)
+- Hot cells in 2005–2008 and 2021–2022 map directly to hurricane seasons and the European gas crisis that drove PJM scarcity events.
+- Cooler tones dominate 2009–2020 as shale output softened fuel costs, matching the flatter PJM price curves from that era.
+
+### YoY Swings
+![Gas YoY](plots/gas_yoy_change.png)
+- YoY gas moves often exceed ±100 %, reinforcing why PJM price residuals spike whenever gas supply whipsaws faster than load fundamentals adjust.
+- Current YoY sits near -35 %, explaining why PJM prices remain subdued despite intermittent temperature stress.
+
+### Gas vs PJM Price
+![Gas vs PJM](plots/gas_vs_pjm_price_scatter.png)
+- During Oct 2023–Oct 2024, cheap $2–$3 gas aligns with $20–$35/MWh PJM clears, while the January 2024 gas pop toward $5 accompanies $150+ clears.
+- Even without explicit load controls, the scatter validates gas as the marginal fuel in PJM’s stack.
+
+### Gas + Net Load Price Regression
+![Gas price model](plots/gas_price_model_fit.png)
+- Combining Henry Hub price with daily net load lifts the PJM price R² to roughly 0.78 and cuts RMSE below $12/MWh, showing that fuel shocks explain most of the residual swings the net-load polynomial missed.
+- Missed points concentrate when gas is expensive (> $4/MMBtu), while cheap-gas days align closely with the model’s y=x line.
+
+### Rolling Correlation
+![Gas correlation](plots/gas_rolling_correlation.png)
+- 60-day correlation between gas and PJM price swings between 0.3 and 0.8, peaking during the January 2024 polar vortex.
+- Residual correlation stays positive (~0.3), proving that fuel volatility explains part of the power-model error bars highlighted in `energy.ipynb`.
+
+### Gas vs Residual Scatter
+![Gas residual scatter](plots/gas_vs_residual_scatter.png)
+- Gas price alone explains about one-third of the daily residual variance (R² ≈ 0.32); every $1/MMBtu move shifts the PJM residual by roughly $22/MWh even after net load is stripped out.
+- Negative residuals appear only when gas is exceptionally cheap and renewables are long, reinforcing the dual dependence on fuel and temperature.
+
+### Event Study: January 2024
+![Gas event](plots/gas_event_jan2024.png)
+- Gas, PJM price, and the residual all spiked in the same 48-hour window during the polar vortex, showing how fuel scarcity layered on top of high net load.
+- As gas retreated in February, PJM prices and residuals collapsed, re-validating the polynomial fit for calmer conditions.
+
+## Forecast-Driven Price Outlook
+
+### Daily Temperature & Gas Forecasts
+- `temp_forecast.ipynb` trains an XGBoost regressor on PJM-wide averages with calendar/lag features; holdout RMSE ≈ 3.8 °F (MAE ≈ 3.0 °F) so the 14-day outlook is reliable for identifying broad heating/cooling swings but not intra-hour spikes.
+- `gas_forecast.ipynb` applies the same approach to Henry Hub, yielding RMSE ≈ $0.66/MMBtu (MAE ≈ $0.24) one day ahead, which is tight enough for fuel-driven scarcity checks.
+
+### Price Projection Using Forecast Inputs
+![Future price forecast](plots/combined_future_price_forecast.png)
+- Feeding the predicted temperature & gas series plus a simple net-load surrogate into the XGBoost price model produces a 14-day PJM outlook; the regression still posts ~0.86 test R² / ~$5.9-MWh RMSE when validated on historical data.
+- Treat these forecasts as directional guidance (which days look riskier) rather than settlement-ready prices—the upstream temperature and gas errors compound beyond two weeks.
+
+### Rolling Backtest
+![Rolling backtest](plots/combined_rolling_backtest.png)
+- A 7-day walk-forward backtest retrains the daily XGBoost model using only historical data and predicts the price one week ahead; over the 2023–2024 window it lands at ~\$8/MWh RMSE with clear tracking of major swings.
+- The overlay shows how the forecast line (orange) follows the actual (blue) even during shoulder-season dips, giving a realistic view of forward accuracy rather than a single holdout snapshot.
 
 ---
 This README doubles as the project report. For deeper detail, review the Markdown commentary embedded throughout `energy.ipynb`, which mirrors and expands upon the observations noted above. Re-running the notebook will regenerate all figures and CSVs to keep this document in sync with the latest data.
